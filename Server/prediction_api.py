@@ -3,8 +3,12 @@ import pandas as pd
 import os
 import pickle
 import sys
+import logging
 
-print("Flask imported successfully!")  # Add this line to confirm Flask is imported
+# Log only in the master process or the first worker
+if os.getpid() == os.getppid() or os.getpid() == os.getppid() + 1:
+    print("Flask imported successfully!")
+    print("CoreML not available. Will attempt to use scikit-learn model if available.")
 
 app = Flask(__name__, static_url_path='', static_folder='static')
 
@@ -12,6 +16,9 @@ app = Flask(__name__, static_url_path='', static_folder='static')
 MODEL_PATH = "output_models/NotificationTimePredictor.mlmodel"
 SKLEARN_MODEL_PATH = "output_models/NotificationTimePredictor.pkl"
 PORT = 5001  # Changed from 5000 to avoid conflict with AirPlay
+
+DATA_UPLOAD_DIR = "uploaded_data"
+os.makedirs(DATA_UPLOAD_DIR, exist_ok=True)
 
 # Try to load the model - first check if we can use CoreML
 use_coreml = False
@@ -25,7 +32,7 @@ try:
         print(f"Loading CoreML model from {MODEL_PATH}")
         return ct.models.MLModel(MODEL_PATH)
 except ImportError:
-    print("CoreML not available. Will attempt to use scikit-learn model if available.")
+    pass
 
 # Function to load the appropriate model
 def load_model():
@@ -53,7 +60,7 @@ model_type = "coreml" if use_coreml else "sklearn"
 
 # Serve the web interface
 @app.route('/')
-def index():source venv/bin/activatessh -i /Users/james_williams/Documents/AWS/BitByteAI.pem ec2-user@3.135.198.218
+def index():
     return send_from_directory('static', 'index.html')
 
 @app.route('/predict', methods=['POST'])
@@ -93,20 +100,30 @@ def predict():
 def health():
     return jsonify({"status": "ok", "model_available": model is not None})
 
-# Add new endpoint to distribute the model file
+@app.route('/upload_data', methods=['POST'])
+def upload_data():
+    """Endpoint to upload user-contributed data"""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+    
+    file_path = os.path.join(DATA_UPLOAD_DIR, file.filename)
+    file.save(file_path)
+    return jsonify({"message": "Data uploaded successfully"}), 200
+
 @app.route('/download_model', methods=['GET'])
 def download_model():
-    """Endpoint for the app to download the latest seed model"""
+    """Endpoint to download the latest global model"""
     model_type = request.args.get('type', 'sklearn')
+    model_path = SKLEARN_MODEL_PATH if model_type == 'sklearn' else MODEL_PATH
     
-    if model_type == 'coreml' and os.path.exists(MODEL_PATH):
-        return send_from_directory('output_models', os.path.basename(MODEL_PATH), 
-                                 as_attachment=True)
-    elif os.path.exists(SKLEARN_MODEL_PATH):
-        return send_from_directory('output_models', os.path.basename(SKLEARN_MODEL_PATH),
-                                 as_attachment=True)
+    if os.path.exists(model_path):
+        return send_from_directory('output_models', os.path.basename(model_path), as_attachment=True)
     else:
-        return jsonify({"error": "Requested model not available"}), 404
+        return jsonify({"error": "Model not available"}), 404
 
 # Add model info endpoint to check if new model is available
 @app.route('/model_info', methods=['GET'])
@@ -141,6 +158,10 @@ def model_info():
 
 if __name__ == '__main__':
     try:
+        # Log only in the master process
+        if os.getpid() == os.getppid():
+            print("Starting Flask application...")
+        
         # Check if the output_models directory exists
         if not os.path.exists("output_models"):
             print("WARNING: output_models directory not found, creating it now")
@@ -156,7 +177,9 @@ if __name__ == '__main__':
         print(f"Starting server on port {PORT}")
         print(f"Web interface available at http://localhost:{PORT}/")
         print(f"Model status: {'Loaded successfully' if model else 'NOT LOADED - API will return errors'}")
-        app.run(debug=True, host='0.0.0.0', port=PORT)
+        
+        # Remove app.run() since Gunicorn will handle serving the app
+        # app.run(debug=True, host='0.0.0.0', port=PORT)
     except OSError as e:
         if "Address already in use" in str(e):
             print(f"ERROR: Port {PORT} is already in use! Another server might be running.")

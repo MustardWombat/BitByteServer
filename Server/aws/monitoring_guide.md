@@ -106,6 +106,19 @@ aws s3 sync $MODEL_DIR s3://$AWS_BUCKET/models/
 # 0 0 * * 0 /home/ubuntu/backup-models.sh
 ```
 
+## Setting Up Cron Job for Model Training
+
+1. SSH into your EC2 instance.
+2. Open the crontab editor:
+   ```bash
+   crontab -e
+   ```
+3. Add the following line to schedule the job (e.g., daily at midnight):
+   ```bash
+   0 0 * * * /path/to/deploy_model.sh
+   ```
+4. Save and exit.
+
 ## Auto-Scaling (Advanced)
 
 For production systems with higher traffic:
